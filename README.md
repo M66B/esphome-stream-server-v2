@@ -1,55 +1,36 @@
-# esphome-stream-server-v2
-Custom Component for ESPHome enabling Serial over TCP
+# esphome modbus TCP server
 
-This project is forked from the original work at 
-https://github.com/oxan/esphome-stream-server and has been updated to work reliably on ESPHome versions after 2021.10. It has only been tested with ESP32 devices, and support for ESP8266 is not a priority at this time.
+This project is forked from https://github.com/tube0013/esphome-stream-server-v2 and modified to work as a modbus TCP server.
 
-Stream server for ESPHome
-=========================
+Server input and holding registers is supported only.
 
-Custom component for ESPHome to expose a UART stream over Ethernet. Can be used as a serial-to-ethernet bridge as
-known from ESPLink or ser2net by using ESPHome.
+Basic configuration
+-------------------
 
-This component creates a TCP server listening on port 6638 (by default), and relays all data between the connected
-clients and the serial port. It doesn't support any control sequences, telnet options or RFC 2217, just raw data.
 
-Usage
------
-
-Requires ESPHome v2021.10 or higher.
-
-```yaml
+```
 external_components:
-  - source: github://tube0013/esphome-stream-server-v2
+  - source: github://m66b/esphome-stream-server-v2
 
 stream_server:
+  id: tcp
+  port: 502
+
+sensor:
+  - platform: ...
+    ...
+    on_value:
+      then:
+        - lambda: id(tcp).setValueFloat(1, 3, 0x0000, 1000, 2500);
 ```
 
-You can set the UART ID and port to be used under the `stream_server` component.
+Interface functions
+-------------------
 
-```yaml
-uart:
-   id: uart_bus
-   # add further configuration for the UART here
-
-stream_server:
-   uart_id: uart_bus
-   port: 6638
+```
+void setValueUint(uint8_t unit, uint8_t function, uint16_t address, uint16_t value, uint16_t maxage);
+void setValueFloat(uint8_t unit, uint8_t function, uint16_t address, float value, uint16_t maxage);
 ```
 
-You can optionally create a `binary_sensor` to indicate whether a client is currently connected.
+*maxage* is the number of milliseconds a register value is valid. You can use zero for infinitely valid.
 
-```yaml
-stream_server:
-  id: ss
-
-binary_sensor:
-  - platform: stream_server
-    stream_server: ss
-```
-
-Many thank @oxan for the original project.
-
-Credit for completing the socket-abstraction - @vallejoyuridamian
-
-Binary sensor credit to @joshuaspence
