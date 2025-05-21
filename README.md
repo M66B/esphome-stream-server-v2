@@ -31,10 +31,15 @@ Interface functions
 void setValueUint(uint8_t unit, uint8_t function, uint16_t address, uint16_t value, uint16_t maxage);
 void setValueFloat(uint8_t unit, uint8_t function, uint16_t address, float value, uint16_t maxage);
 ```
+*unit* is the device address, generally 1 or 2.
+
+*function* is the modbus function code, 3 for holding registers and 4 for input registers.
+
+*address* is the register address.
 
 *maxage* is the number of milliseconds a register value is valid. You can use zero for infinitely valid.
 
-license
+License
 -------
 
 [GNU General Public License version 3](https://github.com/M66B/esphome-stream-server-v2/blob/main/LICENSE.txt)
