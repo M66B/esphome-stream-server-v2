@@ -212,12 +212,11 @@ void StreamServerComponent::setRegisterUint16(uint8_t unit, uint8_t function, ui
     registers_[{unit, function, address}] = { value, maxage == 0 ? 0 : millis() + maxage };
 }
 
-void StreamServerComponent::setRegisterSint32(uint8_t unit, uint8_t function, uint16_t address, float value, uint16_t maxage) {
-    int32_t x = value;
+void StreamServerComponent::setRegisterSint32(uint8_t unit, uint8_t function, uint16_t address, int32_t value, uint16_t maxage) {
     uint32_t expiration = (maxage == 0 ? 0 : millis() + maxage);
 
-    registers_[{unit, function, address}] = { (uint16_t) (x & 0xFFFF), expiration };
-    registers_[{unit, function, (uint16_t)(address + 1)}] = { (uint16_t)(x >> 16), expiration };
+    registers_[{ unit, function, address} ] = { (uint16_t)(value & 0xFFFF), expiration };
+    registers_[{ unit, function, (uint16_t)(address + 1) }] = { (uint16_t)(value >> 16), expiration };
 }
 
 int32_t StreamServerComponent::getRegister(uint8_t unit, uint8_t function, uint16_t address, bool main) {

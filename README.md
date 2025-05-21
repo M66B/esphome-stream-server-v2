@@ -29,7 +29,7 @@ Interface functions
 
 ```
 void setRegisterUint16(uint8_t unit, uint8_t function, uint16_t address, uint16_t value, uint16_t maxage);
-void setRegisterSint32(uint8_t unit, uint8_t function, uint16_t address, float value, uint16_t maxage);
+void setRegisterSint32(uint8_t unit, uint8_t function, uint16_t address, int32_t value, uint16_t maxage);
 ```
 
 *unit* is the device address, generally 1 or 2.
