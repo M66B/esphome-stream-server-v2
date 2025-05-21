@@ -18,17 +18,15 @@
 
 #include "esphome/core/component.h"
 #include "esphome/components/socket/socket.h"
-#include "esphome/components/uart/uart.h"
 
 #include <memory>
 #include <string>
 #include <vector>
+#include <map>
 
 class StreamServerComponent : public esphome::Component {
 public:
     StreamServerComponent() = default;
-    explicit StreamServerComponent(esphome::uart::UARTComponent *stream) : stream_{stream} {}
-    void set_uart_parent(esphome::uart::UARTComponent *parent) { this->stream_ = parent; }
 
     void setup() override;
     void loop() override;
@@ -38,13 +36,19 @@ public:
     float get_setup_priority() const override { return esphome::setup_priority::AFTER_WIFI; }
 
     void set_port(uint16_t port) { this->port_ = port; }
-	int get_client_count() { return this->clients_.size(); }
-	
+    int get_client_count() { return this->clients_.size(); }
+
+    void setValueUint(uint8_t unit, uint8_t function, uint16_t address, uint16_t value, uint16_t maxage);
+    void setValueFloat(uint8_t unit, uint8_t function, uint16_t address, float value, uint16_t maxage);
+
 protected:
     void accept();
     void cleanup();
     void read();
     void write();
+
+    int32_t getValue(uint8_t unit, uint8_t function, uint16_t address, bool main);
+    char* getHex(uint8_t *buffer, int len);
 
     struct Client {
         Client(std::unique_ptr<esphome::socket::Socket> socket, std::string identifier);
@@ -52,10 +56,31 @@ protected:
         std::unique_ptr<esphome::socket::Socket> socket{nullptr};
         std::string identifier{};
         bool disconnected{false};
+        uint8_t offset = 0;
+        uint8_t buffer[260]; // Max. modbus message length
     };
 
-    esphome::uart::UARTComponent *stream_{nullptr};
+    struct UnitFunctionAddress {
+        uint8_t unit;
+        uint8_t function;
+        uint16_t address;
+
+        bool operator==(const UnitFunctionAddress &o) const {
+            return (unit == o.unit && function == o.function && address == o.address);
+        }
+
+        bool operator<(const UnitFunctionAddress &o)  const {
+            return (unit < o.unit || (unit == o.unit && function < o.function) || (unit == o.unit && function == o.function && address < o.address));
+        }
+    };
+
+    struct ValueAge {
+        uint16_t value;
+        uint32_t expiration;
+    };
+
     std::unique_ptr<esphome::socket::Socket> socket_{};
-    uint16_t port_{6638};
+    uint16_t port_{502};
     std::vector<Client> clients_{};
+    std::map<UnitFunctionAddress, ValueAge> registers_{};
 };
