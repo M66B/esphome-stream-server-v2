@@ -2,33 +2,33 @@ esphome:
   on_boot: 
     then:
       - lambda: |-
-          id(tcp).setRegisterUint(1, 3, 0x000b, 1650, 0); // Model: EM24DINAV23XE1PFB
-          id(tcp).setRegisterUint(1, 3, 0xa000, 7, 0); // Application set to H
-          id(tcp).setRegisterUint(1, 3, 0x0302, 0, 0); // Hardware version
-          id(tcp).setRegisterUint(1, 3, 0x0304, 0, 0); // Firmware version
-          id(tcp).setRegisterUint(1, 3, 0x1002, 3, 0); // Phase config: 1P
-          id(tcp).setRegisterUint(1, 3, 0x0032, 0, 0); // Phase sequence L1-L2-L3
-          id(tcp).setRegisterUint(1, 3, 0xa100, 0, 0); // Switch position
-          id(tcp).setRegisterUint(1, 3, 0x5000, '1' << 8 | '0', 0); // Serial
-          id(tcp).setRegisterUint(1, 3, 0x5001, '1' << 8 | '0', 0);
-          id(tcp).setRegisterUint(1, 3, 0x5002, '1' << 8 | '0', 0);
-          id(tcp).setRegisterUint(1, 3, 0x5003, '1' << 8 | '0', 0);
-          id(tcp).setRegisterUint(1, 3, 0x5004, '1' << 8 | '0', 0);
-          id(tcp).setRegisterUint(1, 3, 0x5005, '1' << 8 | '0', 0);
-          id(tcp).setRegisterUint(1, 3, 0x5006, '1' << 8 | '0', 0);
-          id(tcp).setRegisterFloat(1, 3, 0x0000, 0, 0); // u1
-          id(tcp).setRegisterFloat(1, 3, 0x0002, 0, 0); // u2
-          id(tcp).setRegisterFloat(1, 3, 0x0004, 0, 0); // u3
-          id(tcp).setRegisterFloat(1, 3, 0x000c, 0, 0); // i1
-          id(tcp).setRegisterFloat(1, 3, 0x000e, 0, 0); // i2
-          id(tcp).setRegisterFloat(1, 3, 0x0010, 0, 0); // i3
-          id(tcp).setRegisterFloat(1, 3, 0x0012, 0, 0); // p1
-          id(tcp).setRegisterFloat(1, 3, 0x0014, 0, 0); // p2
-          id(tcp).setRegisterFloat(1, 3, 0x0016, 0, 0); // p3
-          id(tcp).setRegisterFloat(1, 3, 0x0040, 0, 0); // e1 forward
-          id(tcp).setRegisterFloat(1, 3, 0x0042, 0, 0); // e2
-          id(tcp).setRegisterFloat(1, 3, 0x0044, 0, 0); // e3
-          id(tcp).setRegisterFloat(1, 3, 0x0028, 0, 0); // AC power
-          id(tcp).setRegisterUint(1, 3, 0x0033, 0, 0); // AC frequency
-          id(tcp).setRegisterFloat(1, 3, 0x0034, 0, 0); // AC energy forward
-          id(tcp).setRegisterFloat(1, 3, 0x0043, 0, 0); // AC energy reverse
+          id(tcp).setRegisterUint16(1, 3, 0x000b, 1650, 0); // Model: EM24DINAV23XE1PFB
+          id(tcp).setRegisterUint16(1, 3, 0xa000, 7, 0); // Application set to H
+          id(tcp).setRegisterUint16(1, 3, 0x0302, 0, 0); // Hardware version
+          id(tcp).setRegisterUint16(1, 3, 0x0304, 0, 0); // Firmware version
+          id(tcp).setRegisterUint16(1, 3, 0x1002, 3, 0); // Phase config: 1P
+          id(tcp).setRegisterUint16(1, 3, 0x0032, 0, 0); // Phase sequence L1-L2-L3
+          id(tcp).setRegisterUint16(1, 3, 0xa100, 0, 0); // Switch position
+          id(tcp).setRegisterUint16(1, 3, 0x5000, '1' << 8 | '0', 0); // Serial
+          id(tcp).setRegisterUint16(1, 3, 0x5001, '1' << 8 | '0', 0);
+          id(tcp).setRegisterUint16(1, 3, 0x5002, '1' << 8 | '0', 0);
+          id(tcp).setRegisterUint16(1, 3, 0x5003, '1' << 8 | '0', 0);
+          id(tcp).setRegisterUint16(1, 3, 0x5004, '1' << 8 | '0', 0);
+          id(tcp).setRegisterUint16(1, 3, 0x5005, '1' << 8 | '0', 0);
+          id(tcp).setRegisterUint16(1, 3, 0x5006, '1' << 8 | '0', 0);
+          id(tcp).setRegisterSint32(1, 3, 0x0000, 0, 0); // u1
+          id(tcp).setRegisterSint32(1, 3, 0x0002, 0, 0); // u2
+          id(tcp).setRegisterSint32(1, 3, 0x0004, 0, 0); // u3
+          id(tcp).setRegisterSint32(1, 3, 0x000c, 0, 0); // i1
+          id(tcp).setRegisterSint32(1, 3, 0x000e, 0, 0); // i2
+          id(tcp).setRegisterSint32(1, 3, 0x0010, 0, 0); // i3
+          id(tcp).setRegisterSint32(1, 3, 0x0012, 0, 0); // p1
+          id(tcp).setRegisterSint32(1, 3, 0x0014, 0, 0); // p2
+          id(tcp).setRegisterSint32(1, 3, 0x0016, 0, 0); // p3
+          id(tcp).setRegisterSint32(1, 3, 0x0040, 0, 0); // e1 forward
+          id(tcp).setRegisterSint32(1, 3, 0x0042, 0, 0); // e2
+          id(tcp).setRegisterSint32(1, 3, 0x0044, 0, 0); // e3
+          id(tcp).setRegisterSint32(1, 3, 0x0028, 0, 0); // AC power
+          id(tcp).setRegisterUint16(1, 3, 0x0033, 0, 0); // AC frequency
+          id(tcp).setRegisterSint32(1, 3, 0x0034, 0, 0); // AC energy forward
+          id(tcp).setRegisterSint32(1, 3, 0x0043, 0, 0); // AC energy reverse
