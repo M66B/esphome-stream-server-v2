@@ -165,7 +165,7 @@ void StreamServerComponent::write() {
                 response[7] = function;
                 response[8] = count * 2; // number of bytes following
                 for (int a = address; a < address + count; a++) {
-                    int32_t val = getValue(unit, function, a, a == address);
+                    int32_t val = getRegister(unit, function, a, a == address);
                     if (val > 0x10000) {
                         if (a == address) {
                             error = val & 0xF;
@@ -220,7 +220,7 @@ void StreamServerComponent::setRegisterFloat(uint8_t unit, uint8_t function, uin
     registers_[{unit, function, (uint16_t)(address + 1)}] = { (uint16_t)(x >> 16), expiration };
 }
 
-int32_t StreamServerComponent::getValue(uint8_t unit, uint8_t function, uint16_t address, bool main) {
+int32_t StreamServerComponent::getRegister(uint8_t unit, uint8_t function, uint16_t address, bool main) {
     // 3 = Read holding registers
     // 4 = Read input registers
     if (function != 3 && function != 4) {

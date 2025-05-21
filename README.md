@@ -2,7 +2,7 @@
 
 This project is forked from https://github.com/tube0013/esphome-stream-server-v2 and modified to work as a modbus TCP server.
 
-Serving input and holding registers is supported only.
+Serving single or single range input and holding registers is only supported for now.
 
 Basic configuration
 -------------------
@@ -31,6 +31,7 @@ Interface functions
 void setRegisterUint(uint8_t unit, uint8_t function, uint16_t address, uint16_t value, uint16_t maxage);
 void setRegisterFloat(uint8_t unit, uint8_t function, uint16_t address, float value, uint16_t maxage);
 ```
+
 *unit* is the device address, generally 1 or 2.
 
 *function* is the modbus function code, 3 for holding registers and 4 for input registers.

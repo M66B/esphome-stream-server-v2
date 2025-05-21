@@ -47,7 +47,7 @@ protected:
     void read();
     void write();
 
-    int32_t getValue(uint8_t unit, uint8_t function, uint16_t address, bool main);
+    int32_t getRegister(uint8_t unit, uint8_t function, uint16_t address, bool main);
     char* getHex(uint8_t *buffer, int len);
 
     struct Client {
