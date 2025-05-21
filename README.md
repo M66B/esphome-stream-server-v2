@@ -2,7 +2,7 @@
 
 This project is forked from https://github.com/tube0013/esphome-stream-server-v2 and modified to work as a modbus TCP server.
 
-Server input and holding registers is supported only.
+Serving input and holding registers is supported only.
 
 Basic configuration
 -------------------
@@ -34,3 +34,7 @@ void setValueFloat(uint8_t unit, uint8_t function, uint16_t address, float value
 
 *maxage* is the number of milliseconds a register value is valid. You can use zero for infinitely valid.
 
+license
+-------
+
+[GNU General Public License version 3](https://github.com/M66B/esphome-stream-server-v2/blob/main/LICENSE.txt)
