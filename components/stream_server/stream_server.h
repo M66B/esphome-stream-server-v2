@@ -38,8 +38,8 @@ public:
     void set_port(uint16_t port) { this->port_ = port; }
     int get_client_count() { return this->clients_.size(); }
 
-    void setValueUint(uint8_t unit, uint8_t function, uint16_t address, uint16_t value, uint16_t maxage);
-    void setValueFloat(uint8_t unit, uint8_t function, uint16_t address, float value, uint16_t maxage);
+    void setRegisterUint(uint8_t unit, uint8_t function, uint16_t address, uint16_t value, uint16_t maxage);
+    void setRegisterFloat(uint8_t unit, uint8_t function, uint16_t address, float value, uint16_t maxage);
 
 protected:
     void accept();

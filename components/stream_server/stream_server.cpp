@@ -208,11 +208,11 @@ void StreamServerComponent::write() {
     }
 }
 
-void StreamServerComponent::setValueUint(uint8_t unit, uint8_t function, uint16_t address, uint16_t value, uint16_t maxage) {
+void StreamServerComponent::setRegisterUint(uint8_t unit, uint8_t function, uint16_t address, uint16_t value, uint16_t maxage) {
     registers_[{unit, function, address}] = { value, maxage == 0 ? 0 : millis() + maxage };
 }
 
-void StreamServerComponent::setValueFloat(uint8_t unit, uint8_t function, uint16_t address, float value, uint16_t maxage) {
+void StreamServerComponent::setRegisterFloat(uint8_t unit, uint8_t function, uint16_t address, float value, uint16_t maxage) {
     int32_t x = value;
     uint32_t expiration = (maxage == 0 ? 0 : millis() + maxage);
 
