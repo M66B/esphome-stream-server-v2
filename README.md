@@ -22,6 +22,14 @@ sensor:
     on_value:
       then:
         - lambda: id(tcp).setRegisterSint32(1, 3, 0x0000, 1000, 2500);
+
+  - platform: template
+    name: "Client count"
+    icon: mdi:connection
+    entity_category: diagnostic
+    accuracy_decimals: 0
+    lambda: return id(tcp).get_client_count();
+    update_interval: 60s
 ```
 
 Interface functions
