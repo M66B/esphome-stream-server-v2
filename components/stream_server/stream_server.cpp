@@ -75,13 +75,16 @@ void StreamServerComponent::accept() {
     socket->setblocking(false);
     std::string identifier = socket->getpeername();
     this->clients_.emplace_back(std::move(socket), identifier);
-    ESP_LOGW(TAG, "New client connected from %s", identifier.c_str());
+    ESP_LOGI(TAG, "New client #%d connected from %s", this->get_client_count(), identifier.c_str());
 }
 
 void StreamServerComponent::cleanup() {
+    int count = this->get_client_count();
     auto discriminator = [](const Client &client) { return !client.disconnected; };
     auto last_client = std::partition(this->clients_.begin(), this->clients_.end(), discriminator);
     this->clients_.erase(last_client, this->clients_.end());
+    if (count != this->get_client_count())
+        ESP_LOGI(TAG, "%d clients connected", this->get_client_count());
 }
 
 void StreamServerComponent::read() {
@@ -99,13 +102,16 @@ void StreamServerComponent::write() {
                     break;
             }
             if (len == 0) {
-                ESP_LOGW(TAG, "Client %s disconnected header", client.identifier.c_str());
+                ESP_LOGI(TAG, "Client %s disconnected header, error %d: %s", client.identifier.c_str(), errno, strerror(errno));
+                client.disconnected = true;
+                continue;
+            }
+            if (len < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+                ESP_LOGE(TAG, "Client header, error %d: %s", errno, strerror(errno));
                 client.disconnected = true;
                 continue;
             }
             if (client.offset < 6)
-                continue;
-            if (len < 0)
                 continue;
         }
 
@@ -125,7 +131,12 @@ void StreamServerComponent::write() {
                     break;
             }
             if (len == 0) {
-                ESP_LOGW(TAG, "Client %s disconnected message", client.identifier.c_str());
+                ESP_LOGI(TAG, "Client %s disconnected data, error %d: %s", client.identifier.c_str(), errno, strerror(errno));
+                client.disconnected = true;
+                continue;
+            }
+            if (len < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+                ESP_LOGE(TAG, "Client data, error %d: %s", errno, strerror(errno));
                 client.disconnected = true;
                 continue;
             }
@@ -184,7 +195,12 @@ void StreamServerComponent::write() {
 
             if (error == 0) {
                 ESP_LOGD(TAG, "Sending response %s", getHex(response, sizeof(response)));
-                client.socket->write(response, sizeof(response));
+                ssize_t sent = client.socket->write(response, sizeof(response));
+                if (sent != sizeof(response)) {
+                    ESP_LOGE(TAG, "Sending response failed, error %d: %s", errno, strerror(errno));
+                    client.disconnected = true;
+                    continue;
+                }
             } else {
                 response[4] = 0;
                 response[5] = 3; // number of bytes following
@@ -192,7 +208,12 @@ void StreamServerComponent::write() {
                 response[7] = function | 0x80;
                 response[8] = error;
                 ESP_LOGE(TAG, "Sending error %d: %s", error, getHex(response, 8));
-                client.socket->write(response, 8);
+                ssize_t sent = client.socket->write(response, 8);
+                if (sent != 8) {
+                    ESP_LOGE(TAG, "Sending error failed, error %d: %s", errno, strerror(errno));
+                    client.disconnected = true;
+                    continue;
+                }
 
                 // 01   The received function code can not be processed.
                 // 02   The data address specified in the request is not available.
