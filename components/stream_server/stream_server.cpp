@@ -19,6 +19,7 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
 #include "esphome/core/util.h"
+#include "esphome/core/application.h"
 
 #include "esphome/components/network/util.h"
 #include "esphome/components/socket/socket.h"
@@ -93,6 +94,7 @@ void StreamServerComponent::write() {
         if (client.offset < 6) {
             while ((len = client.socket->read(((uint8_t *)&client.buffer) + client.offset, 6 - client.offset)) > 0) {
                 client.offset = client.offset + len;
+                App.feed_wdt();
                 if (client.offset >= 6)
                     break;
             }
@@ -118,6 +120,7 @@ void StreamServerComponent::write() {
         if (client.offset < 6 + msglen) {
             while ((len = client.socket->read(((uint8_t *)&client.buffer) + client.offset, (6 + msglen) - client.offset)) > 0) {
                 client.offset = client.offset + len;
+                App.feed_wdt();
                 if (client.offset >= 6 + msglen)
                     break;
             }
@@ -209,11 +212,11 @@ void StreamServerComponent::write() {
 }
 
 void StreamServerComponent::setRegisterUint16(uint8_t unit, uint8_t function, uint16_t address, uint16_t value, uint16_t maxage) {
-    registers_[{unit, function, address}] = { value, maxage == 0 ? 0 : millis() + maxage };
+    registers_[{unit, function, address}] = { value, maxage == 0 ? 0 : esphome::millis() + maxage };
 }
 
 void StreamServerComponent::setRegisterSint32(uint8_t unit, uint8_t function, uint16_t address, int32_t value, uint16_t maxage) {
-    uint32_t expiration = (maxage == 0 ? 0 : millis() + maxage);
+    uint32_t expiration = (maxage == 0 ? 0 : esphome::millis() + maxage);
 
     registers_[{ unit, function, address} ] = { (uint16_t)(value & 0xFFFF), expiration };
     registers_[{ unit, function, (uint16_t)(address + 1) }] = { (uint16_t)(value >> 16), expiration };
@@ -229,10 +232,10 @@ int32_t StreamServerComponent::getRegister(uint8_t unit, uint8_t function, uint1
 
     auto reg = registers_.find({unit, function, address});
     if (reg != registers_.end())
-        if (reg->second.expiration == 0 || reg->second.expiration > millis())
+        if (reg->second.expiration == 0 || reg->second.expiration > esphome::millis())
             return reg->second.value;
         else {
-            ESP_LOGW(TAG, "Value at address %x expired %d ms ago", address, millis() - reg->second.expiration);
+            ESP_LOGW(TAG, "Value at address %x expired %d ms ago", address, esphome::millis() - reg->second.expiration);
             return 0x10002;
         }
     else {
