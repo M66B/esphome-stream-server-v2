@@ -104,13 +104,15 @@ void StreamServerComponent::write() {
                     break;
             }
             if (len == 0) {
-                ESP_LOGI(TAG, "Client %s disconnected header, error %d: %s", client.identifier.c_str(), errno, strerror(errno));
+                ESP_LOGI(TAG, "Client %s sent no header", client.identifier.c_str(), errno, strerror(errno));
                 client.disconnected = true;
                 continue;
             }
-            if (len < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
-                ESP_LOGE(TAG, "Client header, error %d: %s", errno, strerror(errno));
-                client.disconnected = true;
+            if (len < 0) {
+                if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                    ESP_LOGE(TAG, "Client header, error %d: %s", errno, strerror(errno));
+                    client.disconnected = true;
+                }
                 continue;
             }
             if (client.offset < 6)
@@ -133,13 +135,15 @@ void StreamServerComponent::write() {
                     break;
             }
             if (len == 0) {
-                ESP_LOGI(TAG, "Client %s disconnected data, error %d: %s", client.identifier.c_str(), errno, strerror(errno));
+                ESP_LOGI(TAG, "Client %s sent no message", client.identifier.c_str());
                 client.disconnected = true;
                 continue;
             }
-            if (len < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
-                ESP_LOGE(TAG, "Client data, error %d: %s", errno, strerror(errno));
-                client.disconnected = true;
+            if (len < 0) {
+                if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                    ESP_LOGE(TAG, "Client data, error %d: %s", errno, strerror(errno));
+                    client.disconnected = true;
+                }
                 continue;
             }
             if (client.offset < 6 + msglen)
