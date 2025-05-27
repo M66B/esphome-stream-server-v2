@@ -73,8 +73,8 @@ void StreamServerComponent::accept() {
         return;
 
     socket->setblocking(false);
-    int enable = 1;
-    socket->setsockopt(IPPROTO_TCP, TCP_NODELAY, &enable, sizeof(int));
+    int on = this->notcpdelay;
+    socket->setsockopt(IPPROTO_TCP, TCP_NODELAY, &on, sizeof(int));
     std::string identifier = socket->getpeername();
     this->clients_.emplace_back(std::move(socket), identifier);
     ESP_LOGI(TAG, "New client #%d connected from %s", this->get_client_count(), identifier.c_str());

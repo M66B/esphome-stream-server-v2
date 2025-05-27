@@ -37,6 +37,7 @@ public:
 
     void set_port(uint16_t port) { this->port_ = port; }
     int get_client_count() { return this->clients_.size(); }
+    void set_no_tcp_delay(bool on) { this->notcpdelay = (on ? 1 : 0); }
 
     void setRegisterUint16(uint8_t unit, uint8_t function, uint16_t address, uint16_t value, uint16_t maxage);
     void setRegisterSint32(uint8_t unit, uint8_t function, uint16_t address, int32_t value, uint16_t maxage);
@@ -81,6 +82,7 @@ protected:
 
     std::unique_ptr<esphome::socket::Socket> socket_{};
     uint16_t port_{502};
+    bool notcpdelay = 1;
     std::vector<Client> clients_{};
     std::map<UnitFunctionAddress, ValueAge> registers_{};
 };
