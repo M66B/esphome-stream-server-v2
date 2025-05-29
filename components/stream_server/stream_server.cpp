@@ -112,6 +112,7 @@ void StreamServerComponent::write() {
                     break;
             }
             if (len == 0) {
+                // When a stream socket peer has performed an orderly shutdown, the return value will be 0 (the traditional "end-of-file" return).
                 ESP_LOGI(TAG, "Client %s sent no header", client.identifier.c_str(), errno, strerror(errno));
                 client.disconnected = true;
                 continue;
