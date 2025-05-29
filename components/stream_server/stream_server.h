@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include "esphome/core/hal.h"
 #include "esphome/core/component.h"
 #include "esphome/components/socket/socket.h"
 
@@ -37,6 +38,7 @@ public:
 
     void set_port(uint16_t port) { this->port_ = port; }
     int get_client_count() { return this->clients_.size(); }
+    void set_max_inactivity_time(uint32_t duration) { this->max_inactivity_time = duration; }
     void set_no_tcp_delay(bool on) { this->notcpdelay = (on ? 1 : 0); }
 
     void setRegisterUint16(uint8_t unit, uint8_t function, uint16_t address, uint16_t value, uint16_t maxage);
@@ -59,6 +61,7 @@ protected:
         bool disconnected{false};
         uint8_t offset = 0;
         uint8_t buffer[260]; // Max. modbus message length
+        uint32_t last_activity = esphome::millis();
     };
 
     struct UnitFunctionAddress {
@@ -82,6 +85,7 @@ protected:
 
     std::unique_ptr<esphome::socket::Socket> socket_{};
     uint16_t port_{502};
+    uint32_t max_inactivity_time = 5 * 60 * 1000;
     bool notcpdelay = 1;
     std::vector<Client> clients_{};
     std::map<UnitFunctionAddress, ValueAge> registers_{};

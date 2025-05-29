@@ -81,6 +81,14 @@ void StreamServerComponent::accept() {
 }
 
 void StreamServerComponent::cleanup() {
+    uint32_t now = esphome::millis();
+    for (Client &client : this->clients_) {
+        if (client.last_activity + this->max_inactivity_time < now) {
+            client.disconnected = true;
+            ESP_LOGW(TAG, "Client %s inactive for %d s", client.identifier.c_str(), (now - client.last_activity) / 1000);
+        }
+    }
+
     int count = this->get_client_count();
     auto discriminator = [](const Client &client) { return !client.disconnected; };
     auto last_client = std::partition(this->clients_.begin(), this->clients_.end(), discriminator);
@@ -150,6 +158,7 @@ void StreamServerComponent::write() {
                 continue;
         }
 
+        client.last_activity = esphome::millis();
         ESP_LOGD(TAG, "Received %d bytes %s", client.offset, getHex(client.buffer, client.offset));
         if (client.offset == 12) {
             uint16_t transaction = client.buffer[0] << 8 | client.buffer[1];
