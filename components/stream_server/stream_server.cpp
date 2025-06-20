@@ -160,7 +160,7 @@ void StreamServerComponent::write() {
         }
 
         client.last_activity = esphome::millis();
-        ESP_LOGD(TAG, "Received %d bytes %s", client.offset, getHex(client.buffer, client.offset));
+        ESP_LOGD(TAG, "Received %d bytes %s", client.offset, format_hex(client.buffer, client.offset).c_str());
         if (client.offset == 12) {
             uint16_t transaction = client.buffer[0] << 8 | client.buffer[1];
             uint16_t protocol = client.buffer[2] << 8 | client.buffer[3];
@@ -210,7 +210,7 @@ void StreamServerComponent::write() {
             }
 
             if (error == 0) {
-                ESP_LOGD(TAG, "Sending response %s", getHex(response, sizeof(response)));
+                ESP_LOGD(TAG, "Sending response %s", format_hex(response, sizeof(response)).c_str());
                 ssize_t sent = client.socket->write(response, sizeof(response));
                 if (sent != sizeof(response)) {
                     ESP_LOGE(TAG, "Sending response failed, error %d: %s", errno, strerror(errno));
@@ -223,7 +223,7 @@ void StreamServerComponent::write() {
                 // unit
                 response[7] = function | 0x80;
                 response[8] = error;
-                ESP_LOGE(TAG, "Sending error %d: %s", error, getHex(response, 8));
+                ESP_LOGE(TAG, "Sending error %d: %s", error, format_hex(response, 8).c_str());
                 ssize_t sent = client.socket->write(response, 8);
                 if (sent != 8) {
                     ESP_LOGE(TAG, "Sending error failed, error %d: %s", errno, strerror(errno));
@@ -280,14 +280,6 @@ int32_t StreamServerComponent::getRegister(uint8_t unit, uint8_t function, uint1
             ESP_LOGW(TAG, "Address %x not available", address);
         return 0x10002; // The data address specified in the request is not available.
     }
-}
-
-char* StreamServerComponent::getHex(uint8_t *buf, int len) {
-    static char hex[512 + 1];
-    for(int i = 0; i < len && i < sizeof(hex) / 2; i++)
-        sprintf(&hex[i * 2], "%02X", buf[i]);
-    hex[len * 2] = 0;
-    return hex;
 }
 
 void StreamServerComponent::dump_config() {
