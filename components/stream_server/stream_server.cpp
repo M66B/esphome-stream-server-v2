@@ -75,7 +75,9 @@ void StreamServerComponent::accept() {
     socket->setblocking(false);
     int on = this->notcpdelay;
     socket->setsockopt(IPPROTO_TCP, TCP_NODELAY, &on, sizeof(int));
-    std::string identifier = socket->getpeername();
+    char peer[esphome::socket::SOCKADDR_STR_LEN];
+    socket->getpeername_to(peer);
+    std::string identifier(peer);
     this->clients_.emplace_back(std::move(socket), identifier);
     ESP_LOGI(TAG, "New client #%d connected from %s", this->get_client_count(), identifier.c_str());
 }
@@ -286,8 +288,11 @@ void StreamServerComponent::dump_config() {
     ESP_LOGCONFIG(TAG, "Stream Server:");
     std::string ip_str = "";
     for (auto &ip : network::get_ip_addresses()) {
-      if (ip.is_set())
-        ip_str += " " + ip.str();
+        if (ip.is_set()) {
+            char ip_buf[network::IP_ADDRESS_BUFFER_SIZE];
+            ip_str += " ";
+            ip_str += ip.str_to(ip_buf);
+        }
     }
     ESP_LOGCONFIG(TAG, "  Address:%s", ip_str.c_str());
     ESP_LOGCONFIG(TAG, "  Port: %u", this->port_);
