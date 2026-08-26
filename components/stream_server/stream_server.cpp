@@ -16,294 +16,405 @@
 
 #include "stream_server.h"
 
+#include "esphome/components/network/util.h"
+#include "esphome/core/application.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
-#include "esphome/core/util.h"
-#include "esphome/core/application.h"
 
-#include "esphome/components/network/util.h"
-#include "esphome/components/socket/socket.h"
+#include <algorithm>
+#include <cerrno>
+#include <cstdio>
+#include <cstring>
+#include <utility>
 
-static const char *TAG = "streamserver";
+static const char *const TAG = "streamserver";
 
 using namespace esphome;
 
 void StreamServerComponent::setup() {
-    ESP_LOGCONFIG(TAG, "Setting up stream server...");
+  ESP_LOGCONFIG(TAG, "Setting up stream server...");
 
-    struct sockaddr_in bind_addr = {
-        .sin_len = sizeof(struct sockaddr_in),
-        .sin_family = AF_INET,
-        .sin_port = htons(this->port_),
-        .sin_addr = {
-            .s_addr = ESPHOME_INADDR_ANY,
-        }
-    };
+  // Use ESPHome's platform-neutral listening socket. It selects IPv4 or IPv6
+  // for the current build and returns the dedicated raw-lwIP listener type
+  // where that implementation requires one.
+  this->socket_ = socket::socket_ip_loop_monitored(SOCK_STREAM, 0);
+  if (!this->socket_) {
+    this->socket_setup_failed_("creation");
+    return;
+  }
 
-    this->socket_ = socket::socket(AF_INET, SOCK_STREAM, PF_INET);
+  int enable = 1;
+  if (this->socket_->setsockopt(SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(enable)) != 0)
+    ESP_LOGW(TAG, "SO_REUSEADDR failed: errno %d (%s)", errno, strerror(errno));
 
-    struct timeval timeout;
-    timeout.tv_sec = 0;
-    timeout.tv_usec = 20000; // ESPHome recommends 20-30 ms max for timeouts
+  if (this->socket_->setblocking(false) != 0) {
+    this->socket_setup_failed_("nonblocking");
+    return;
+  }
 
-#ifdef ESP8266
-    this->socket_->setsockopt(SOL_SOCKET, LWIP_SO_RCVTIMEO, (char *)&timeout, sizeof(timeout));
-    this->socket_->setsockopt(SOL_SOCKET, LWIP_SO_RCVTIMEO, (char *)&timeout, sizeof(timeout));
-#else
-    this->socket_->setsockopt(SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout));
-    this->socket_->setsockopt(SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout));
-#endif
+  this->clients_.reserve(this->max_clients_);
 
-    this->socket_->bind(reinterpret_cast<struct sockaddr *>(&bind_addr), sizeof(struct sockaddr_in));
-    this->socket_->listen(8);
+  struct sockaddr_storage bind_address{};
+  socklen_t bind_length = socket::set_sockaddr_any(reinterpret_cast<struct sockaddr *>(&bind_address),
+                                                   sizeof(bind_address), this->port_);
+  if (bind_length == 0) {
+    this->socket_setup_failed_("set address");
+    return;
+  }
+
+  if (this->socket_->bind(reinterpret_cast<struct sockaddr *>(&bind_address), bind_length) != 0) {
+    this->socket_setup_failed_("bind");
+    return;
+  }
+
+  if (this->socket_->listen(this->max_clients_) != 0) {
+    this->socket_setup_failed_("listen");
+    return;
+  }
 }
 
 void StreamServerComponent::loop() {
-    this->accept();
-    this->read();
-    this->write();
-    this->cleanup();
+  if (this->is_failed())
+    return;
+
+  this->accept_client_();
+  for (Client &client : this->clients_) {
+    if (!client.disconnected)
+      this->service_client_(client);
+  }
+  this->cleanup_clients_();
 }
 
-void StreamServerComponent::accept() {
-    struct sockaddr_in client_addr;
-    socklen_t client_addrlen = sizeof(struct sockaddr_in);
-    std::unique_ptr<socket::Socket> socket = this->socket_->accept(reinterpret_cast<struct sockaddr *>(&client_addr), &client_addrlen);
-    if (!socket)
-        return;
+void StreamServerComponent::accept_client_() {
+  struct sockaddr_storage client_address{};
+  socklen_t client_address_length = sizeof(client_address);
+  std::unique_ptr<socket::Socket> client_socket =
+      this->socket_->accept(reinterpret_cast<struct sockaddr *>(&client_address), &client_address_length);
 
-    socket->setblocking(false);
-    int on = this->notcpdelay;
-    socket->setsockopt(IPPROTO_TCP, TCP_NODELAY, &on, sizeof(int));
-    char peer[esphome::socket::SOCKADDR_STR_LEN];
-    socket->getpeername_to(peer);
-    std::string identifier(peer);
-    this->clients_.emplace_back(std::move(socket), identifier);
-    ESP_LOGI(TAG, "New client #%d connected from %s", this->get_client_count(), identifier.c_str());
+  if (!client_socket) {
+    if (errno != EAGAIN && errno != EWOULDBLOCK)
+      ESP_LOGW(TAG, "Accept failed: errno %d (%s)", errno, strerror(errno));
+    return;
+  }
+
+  char peer[esphome::socket::SOCKADDR_STR_LEN]{};
+  client_socket->getpeername_to(peer);
+
+  if (this->clients_.size() >= this->max_clients_) {
+    ESP_LOGW(TAG, "Rejecting client %s: maximum of %u clients reached", peer, this->max_clients_);
+    client_socket->shutdown(SHUT_RDWR);
+    return;
+  }
+
+  if (client_socket->setblocking(false) != 0) {
+    ESP_LOGW(TAG, "Could not make client %s non-blocking: errno %d (%s)", peer, errno, strerror(errno));
+    client_socket->shutdown(SHUT_RDWR);
+    return;
+  }
+
+  int no_delay = this->no_tcp_delay_ ? 1 : 0;
+  if (client_socket->setsockopt(IPPROTO_TCP, TCP_NODELAY, &no_delay, sizeof(no_delay)) != 0)
+    ESP_LOGW(TAG, "TCP_NODELAY for client %s failed: errno %d (%s)", peer, errno, strerror(errno));
+
+  this->clients_.emplace_back(std::move(client_socket), peer);
+  ESP_LOGI(TAG, "New client #%d connected from %s", this->get_client_count(), peer);
 }
 
-void StreamServerComponent::cleanup() {
-    uint32_t now = esphome::millis();
-    for (Client &client : this->clients_) {
-        if (client.last_activity + this->max_inactivity_time < now) {
-            client.disconnected = true;
-            ESP_LOGW(TAG, "Client %s inactive for %d s", client.identifier.c_str(), (now - client.last_activity) / 1000);
-        }
+void StreamServerComponent::service_client_(Client &client) {
+  // A previous non-blocking write may still have bytes pending. Do not accept
+  // another request from this client until its response has been completed.
+  if (!this->flush_response_(client) || client.disconnected)
+    return;
+
+  if (!this->read_request_(client) || client.disconnected)
+    return;
+
+  ESP_LOGD(TAG, "Received %u bytes from %s: %s", static_cast<unsigned>(client.request_offset),
+           client.identifier.data(), format_hex(client.request.data(), client.request_offset).c_str());
+
+  this->process_request_(client);
+  client.request_offset = 0;
+  this->flush_response_(client);
+}
+
+bool StreamServerComponent::read_request_(Client &client) {
+  size_t target_length = MBAP_HEADER_SIZE;
+
+  while (true) {
+    if (client.request_offset >= MBAP_HEADER_SIZE) {
+      const uint16_t message_length =
+          (static_cast<uint16_t>(client.request[4]) << 8) | client.request[5];
+      target_length = MBAP_HEADER_SIZE + message_length;
+      if (target_length > client.request.size()) {
+        ESP_LOGW(TAG, "Client %s sent an oversized frame (%u bytes)", client.identifier.data(),
+                 static_cast<unsigned>(target_length));
+        client.disconnected = true;
+        return false;
+      }
     }
 
-    int count = this->get_client_count();
-    auto discriminator = [](const Client &client) { return !client.disconnected; };
-    auto last_client = std::partition(this->clients_.begin(), this->clients_.end(), discriminator);
-    this->clients_.erase(last_client, this->clients_.end());
-    if (count != this->get_client_count())
-        ESP_LOGI(TAG, "%d clients connected", this->get_client_count());
-}
+    if (client.request_offset >= target_length)
+      return true;
 
-void StreamServerComponent::read() {
-}
-
-void StreamServerComponent::write() {
-    ssize_t len;
-    for (Client &client : this->clients_) {
-        // Header
-        if (client.offset < 6) {
-            while ((len = client.socket->read(((uint8_t *)&client.buffer) + client.offset, 6 - client.offset)) > 0) {
-                client.offset = client.offset + len;
-                App.feed_wdt();
-                if (client.offset >= 6)
-                    break;
-            }
-            if (len == 0) {
-                // When a stream socket peer has performed an orderly shutdown, the return value will be 0 (the traditional "end-of-file" return).
-                ESP_LOGI(TAG, "Client %s sent no header", client.identifier.c_str(), errno, strerror(errno));
-                client.disconnected = true;
-                continue;
-            }
-            if (len < 0) {
-                if (errno != EAGAIN && errno != EWOULDBLOCK) {
-                    ESP_LOGE(TAG, "Client header, error %d: %s", errno, strerror(errno));
-                    client.disconnected = true;
-                }
-                continue;
-            }
-            if (client.offset < 6)
-                continue;
-        }
-
-        uint16_t msglen = client.buffer[4] << 8 | client.buffer[5]; // Number of bytes following
-        if (msglen > 100) {
-            ESP_LOGE(TAG, "Message length %d > 100", msglen);
-            client.disconnected = true;
-            continue;
-        }
-
-        // Message
-        if (client.offset < 6 + msglen) {
-            while ((len = client.socket->read(((uint8_t *)&client.buffer) + client.offset, (6 + msglen) - client.offset)) > 0) {
-                client.offset = client.offset + len;
-                App.feed_wdt();
-                if (client.offset >= 6 + msglen)
-                    break;
-            }
-            if (len == 0) {
-                ESP_LOGI(TAG, "Client %s sent no message", client.identifier.c_str());
-                client.disconnected = true;
-                continue;
-            }
-            if (len < 0) {
-                if (errno != EAGAIN && errno != EWOULDBLOCK) {
-                    ESP_LOGE(TAG, "Client data, error %d: %s", errno, strerror(errno));
-                    client.disconnected = true;
-                }
-                continue;
-            }
-            if (client.offset < 6 + msglen)
-                continue;
-        }
-
-        client.last_activity = esphome::millis();
-        ESP_LOGD(TAG, "Received %d bytes %s", client.offset, format_hex(client.buffer, client.offset).c_str());
-        if (client.offset == 12) {
-            uint16_t transaction = client.buffer[0] << 8 | client.buffer[1];
-            uint16_t protocol = client.buffer[2] << 8 | client.buffer[3];
-            uint8_t unit = client.buffer[6];
-            uint8_t function = client.buffer[7];
-            uint16_t address = client.buffer[8] << 8 | client.buffer[9];
-            uint16_t count = client.buffer[10] << 8 | client.buffer[11];
-            ESP_LOGD(TAG, "Transaction %d protocol %d msglen %d unit %d function %d address %x count %d",
-                transaction, protocol, msglen, unit, function, address, count);
-            if (count > 100) {
-                ESP_LOGE(TAG, "Count %d > 100", count);
-                client.disconnected = true;
-                continue;
-            }
-
-            int error = 0;
-            if (protocol != 0) {
-                error = 4; // An unrecoverable error occurred while the slave attempted to perform the requested action.
-                ESP_LOGE(TAG, "Protocol %d", protocol);
-            }
-
-            uint8_t response[9 + count * 2];
-
-            if (error == 0) {
-                response[0] = client.buffer[0]; // transaction
-                response[1] = client.buffer[1];
-                response[2] = client.buffer[2]; // protocol
-                response[3] = client.buffer[3];
-                response[4] = (3 + count * 2) >> 8; // number of bytes following
-                response[5] = (3 + count * 2) & 0xFF;
-                response[6] = unit;
-                response[7] = function;
-                response[8] = count * 2; // number of bytes following
-                for (int a = address; a < address + count; a++) {
-                    int32_t val = getRegister(unit, function, a, a == address);
-                    if (val > 0x10000) {
-                        if (a == address) {
-                            error = val & 0xF;
-                            break;
-                        }
-                        val = 0;
-                    }
-
-                    response[9 + (a - address) * 2] = val >> 8;
-                    response[9 + (a - address) * 2 + 1] = val & 0xFF;
-                }
-            }
-
-            if (error == 0) {
-                ESP_LOGD(TAG, "Sending response %s", format_hex(response, sizeof(response)).c_str());
-                ssize_t sent = client.socket->write(response, sizeof(response));
-                if (sent != sizeof(response)) {
-                    ESP_LOGE(TAG, "Sending response failed, error %d: %s", errno, strerror(errno));
-                    client.disconnected = true;
-                    continue;
-                }
-            } else {
-                response[4] = 0;
-                response[5] = 3; // number of bytes following
-                // unit
-                response[7] = function | 0x80;
-                response[8] = error;
-                ESP_LOGE(TAG, "Sending error %d: %s", error, format_hex(response, 8).c_str());
-                ssize_t sent = client.socket->write(response, 8);
-                if (sent != 8) {
-                    ESP_LOGE(TAG, "Sending error failed, error %d: %s", errno, strerror(errno));
-                    client.disconnected = true;
-                    continue;
-                }
-
-                // 01   The received function code can not be processed.
-                // 02   The data address specified in the request is not available.
-                // 03   The value contained in the query data field is an invalid value.
-                // 04   An unrecoverable error occurred while the slave attempted to perform the requested action.
-                // 05   The slave has accepted the request and processes it, but it takes a long time. This response prevents the host from generating a timeout error.
-                // 06   The slave is busy processing the command. The master must repeat the message later when the slave is freed.
-                // 07   The slave can not execute the program function specified in the request. This code is returned for an unsuccessful program request using functions with numbers 13 or 14. The master must request diagnostic information or error information from the slave.
-                // 08   The slave detected a parity error when reading the extended memory. The master can repeat the request, but usually in such cases, repairs are required.
-            }
-        } else {
-            ESP_LOGE(TAG, "Unexpected length %d", client.offset);
-        }
-
-        client.offset = 0;
-    }
-}
-
-void StreamServerComponent::setRegisterUint16(uint8_t unit, uint8_t function, uint16_t address, uint16_t value, uint16_t maxage) {
-    registers_[{unit, function, address}] = { value, maxage == 0 ? 0 : esphome::millis() + maxage };
-}
-
-void StreamServerComponent::setRegisterSint32(uint8_t unit, uint8_t function, uint16_t address, int32_t value, uint16_t maxage) {
-    uint32_t expiration = (maxage == 0 ? 0 : esphome::millis() + maxage);
-
-    registers_[{ unit, function, address} ] = { (uint16_t)(value & 0xFFFF), expiration };
-    registers_[{ unit, function, (uint16_t)(address + 1) }] = { (uint16_t)(value >> 16), expiration };
-}
-
-int32_t StreamServerComponent::getRegister(uint8_t unit, uint8_t function, uint16_t address, bool main) {
-    // 3 = Read holding registers
-    // 4 = Read input registers
-    if (function != 3 && function != 4) {
-        ESP_LOGW(TAG, "Function %x not available", function);
-        return 0x10001; // The received function code can not be processed.
+    const ssize_t received = client.socket->read(client.request.data() + client.request_offset,
+                                                 target_length - client.request_offset);
+    if (received > 0) {
+      client.request_offset += static_cast<size_t>(received);
+      client.last_activity = esphome::millis();
+      App.feed_wdt();
+      continue;
     }
 
-    auto reg = registers_.find({unit, function, address});
-    if (reg != registers_.end())
-        if (reg->second.expiration == 0 || reg->second.expiration > esphome::millis())
-            return reg->second.value;
-        else {
-            ESP_LOGW(TAG, "Value at address %x expired %d ms ago", address, esphome::millis() - reg->second.expiration);
-            return 0x10002;
-        }
-    else {
-        if (main)
-            ESP_LOGW(TAG, "Address %x not available", address);
-        return 0x10002; // The data address specified in the request is not available.
+    if (received == 0) {
+      ESP_LOGI(TAG, "Client %s closed the connection", client.identifier.data());
+      client.disconnected = true;
+      return false;
     }
+
+    const int error = errno;
+    if (error == EAGAIN || error == EWOULDBLOCK)
+      return false;
+
+    ESP_LOGW(TAG, "Read from client %s failed: errno %d (%s)", client.identifier.data(), error,
+             strerror(error));
+    client.disconnected = true;
+    return false;
+  }
+}
+
+bool StreamServerComponent::flush_response_(Client &client) {
+  while (client.response_offset < client.response_length) {
+    const ssize_t sent = client.socket->write(client.response.data() + client.response_offset,
+                                              client.response_length - client.response_offset);
+    if (sent > 0) {
+      client.response_offset += static_cast<size_t>(sent);
+      App.feed_wdt();
+      continue;
+    }
+
+    if (sent == 0) {
+      ESP_LOGW(TAG, "Write to client %s made no progress", client.identifier.data());
+      client.disconnected = true;
+      return false;
+    }
+
+    const int error = errno;
+    if (error == EAGAIN || error == EWOULDBLOCK)
+      return false;
+
+    ESP_LOGW(TAG, "Write to client %s failed: errno %d (%s)", client.identifier.data(), error,
+             strerror(error));
+    client.disconnected = true;
+    return false;
+  }
+
+  client.response_length = 0;
+  client.response_offset = 0;
+  return true;
+}
+
+void StreamServerComponent::process_request_(Client &client) {
+  if (client.request_offset != READ_REQUEST_SIZE) {
+    ESP_LOGW(TAG, "Client %s sent an unsupported request length (%u bytes)", client.identifier.data(),
+             static_cast<unsigned>(client.request_offset));
+    client.disconnected = true;
+    return;
+  }
+
+  const uint16_t protocol =
+      (static_cast<uint16_t>(client.request[2]) << 8) | client.request[3];
+  const uint16_t message_length =
+      (static_cast<uint16_t>(client.request[4]) << 8) | client.request[5];
+  const uint8_t unit = client.request[6];
+  const uint8_t function = client.request[7];
+  const uint16_t address =
+      (static_cast<uint16_t>(client.request[8]) << 8) | client.request[9];
+  const uint16_t count =
+      (static_cast<uint16_t>(client.request[10]) << 8) | client.request[11];
+
+  ESP_LOGD(TAG, "Transaction %u protocol %u length %u unit %u function %u address %04x count %u",
+           (static_cast<uint16_t>(client.request[0]) << 8) | client.request[1], protocol, message_length, unit,
+           function, address, count);
+
+  // A non-zero protocol ID means the MBAP header itself is invalid; there is
+  // no valid Modbus transaction to which an exception can be attached.
+  if (protocol != 0) {
+    ESP_LOGW(TAG, "Client %s used unsupported protocol ID %u", client.identifier.data(), protocol);
+    client.disconnected = true;
+    return;
+  }
+
+  if (function != 3 && function != 4) {
+    this->queue_exception_(client, unit, function, 0x01);  // Illegal Function
+    return;
+  }
+
+  const uint32_t range_end = static_cast<uint32_t>(address) + count;
+  if (message_length != 6 || count == 0 || count > MAX_REGISTERS_PER_REQUEST || range_end > 0x10000UL) {
+    this->queue_exception_(client, unit, function, 0x03);  // Illegal Data Value
+    return;
+  }
+
+  client.response[0] = client.request[0];
+  client.response[1] = client.request[1];
+  client.response[2] = 0;
+  client.response[3] = 0;
+  const size_t data_length = static_cast<size_t>(count) * 2;
+  const uint16_t response_mbap_length = static_cast<uint16_t>(3 + data_length);
+  client.response[4] = static_cast<uint8_t>(response_mbap_length >> 8);
+  client.response[5] = static_cast<uint8_t>(response_mbap_length & 0xFF);
+  client.response[6] = unit;
+  client.response[7] = function;
+  client.response[8] = static_cast<uint8_t>(data_length);
+
+  for (uint16_t index = 0; index < count; index++) {
+    uint16_t value;
+    const uint16_t register_address = static_cast<uint16_t>(address + index);
+    if (!this->get_register_(unit, function, register_address, value)) {
+      this->queue_exception_(client, unit, function, 0x02);  // Illegal Data Address
+      return;
+    }
+    const size_t response_index = 9 + static_cast<size_t>(index) * 2;
+    client.response[response_index] = static_cast<uint8_t>(value >> 8);
+    client.response[response_index + 1] = static_cast<uint8_t>(value & 0xFF);
+  }
+
+  client.response_length = 9 + data_length;
+  client.response_offset = 0;
+  ESP_LOGD(TAG, "Queued response for %s: %s", client.identifier.data(),
+           format_hex(client.response.data(), client.response_length).c_str());
+}
+
+void StreamServerComponent::queue_exception_(Client &client, uint8_t unit, uint8_t function, uint8_t exception) {
+  client.response[0] = client.request[0];
+  client.response[1] = client.request[1];
+  client.response[2] = 0;
+  client.response[3] = 0;
+  client.response[4] = 0;
+  client.response[5] = 3;
+  client.response[6] = unit;
+  client.response[7] = function | 0x80;
+  client.response[8] = exception;
+  client.response_length = 9;
+  client.response_offset = 0;
+
+  ESP_LOGW(TAG, "Queued Modbus exception %u for client %s: %s", exception, client.identifier.data(),
+           format_hex(client.response.data(), client.response_length).c_str());
+}
+
+void StreamServerComponent::cleanup_clients_() {
+  const uint32_t now = esphome::millis();
+  for (Client &client : this->clients_) {
+    if (!client.disconnected && this->max_inactivity_time_ != 0 &&
+        now - client.last_activity >= this->max_inactivity_time_) {
+      client.disconnected = true;
+      ESP_LOGW(TAG, "Client %s inactive for %u s", client.identifier.data(),
+               static_cast<unsigned>((now - client.last_activity) / 1000));
+    }
+  }
+
+  const size_t previous_count = this->clients_.size();
+  this->clients_.erase(
+      std::remove_if(this->clients_.begin(), this->clients_.end(),
+                     [](const Client &client) { return client.disconnected; }),
+      this->clients_.end());
+
+  if (previous_count != this->clients_.size())
+    ESP_LOGI(TAG, "%d clients connected", this->get_client_count());
+}
+
+void StreamServerComponent::setRegisterUint16(uint8_t unit, uint8_t function, uint16_t address,
+                                              uint16_t value, uint32_t maxage) {
+  if (function != 3 && function != 4) {
+    ESP_LOGW(TAG, "Ignoring register %04x with unsupported function %u", address, function);
+    return;
+  }
+  this->registers_[{unit, function, address}] = {value, esphome::millis(), maxage};
+}
+
+void StreamServerComponent::setRegisterSint32(uint8_t unit, uint8_t function, uint16_t address,
+                                              int32_t value, uint32_t maxage) {
+  if (function != 3 && function != 4) {
+    ESP_LOGW(TAG, "Ignoring register %04x with unsupported function %u", address, function);
+    return;
+  }
+  if (address == 0xFFFF) {
+    ESP_LOGW(TAG, "Ignoring 32-bit register at %04x: address + 1 would overflow", address);
+    return;
+  }
+
+  const uint32_t raw_value = static_cast<uint32_t>(value);
+  const uint32_t now = esphome::millis();
+
+  // Preserve the original component's low-word-first register ordering.
+  this->registers_[{unit, function, address}] = {
+      static_cast<uint16_t>(raw_value & 0xFFFF), now, maxage};
+  this->registers_[{unit, function, static_cast<uint16_t>(address + 1)}] = {
+      static_cast<uint16_t>(raw_value >> 16), now, maxage};
+}
+
+bool StreamServerComponent::get_register_(uint8_t unit, uint8_t function, uint16_t address,
+                                          uint16_t &value) {
+  const auto reg = this->registers_.find({unit, function, address});
+  if (reg == this->registers_.end()) {
+    ESP_LOGW(TAG, "Address %04x not available for unit %u/function %u", address, unit, function);
+    return false;
+  }
+
+  const uint32_t now = esphome::millis();
+  if (reg->second.max_age != 0 && now - reg->second.updated_at >= reg->second.max_age) {
+    ESP_LOGW(TAG, "Value at address %04x expired %u ms ago", address,
+             static_cast<unsigned>(now - reg->second.updated_at - reg->second.max_age));
+    return false;
+  }
+
+  value = reg->second.value;
+  return true;
 }
 
 void StreamServerComponent::dump_config() {
-    ESP_LOGCONFIG(TAG, "Stream Server:");
-    std::string ip_str = "";
-    for (auto &ip : network::get_ip_addresses()) {
-        if (ip.is_set()) {
-            char ip_buf[network::IP_ADDRESS_BUFFER_SIZE];
-            ip_str += " ";
-            ip_str += ip.str_to(ip_buf);
-        }
-    }
-    ESP_LOGCONFIG(TAG, "  Address:%s", ip_str.c_str());
-    ESP_LOGCONFIG(TAG, "  Port: %u", this->port_);
+  ESP_LOGCONFIG(TAG, "Stream Server:");
+  ESP_LOGCONFIG(TAG, "  Port: %u", this->port_);
+  ESP_LOGCONFIG(TAG, "  Maximum clients: %u", this->max_clients_);
+  ESP_LOGCONFIG(TAG, "  Maximum inactivity: %u ms", static_cast<unsigned>(this->max_inactivity_time_));
+  ESP_LOGCONFIG(TAG, "  TCP no-delay: %s", YESNO(this->no_tcp_delay_));
+
+  bool address_found = false;
+  for (const auto &ip : network::get_ip_addresses()) {
+    if (!ip.is_set())
+      continue;
+    char address[network::IP_ADDRESS_BUFFER_SIZE];
+    ip.str_to(address);
+    ESP_LOGCONFIG(TAG, "  Address: %s:%u", address, this->port_);
+    address_found = true;
+  }
+  if (!address_found)
+    ESP_LOGCONFIG(TAG, "  Address: not assigned");
 }
 
 void StreamServerComponent::on_shutdown() {
-    for (const Client &client : this->clients_)
-        client.socket->shutdown(SHUT_RDWR);
+  for (Client &client : this->clients_)
+    client.socket->shutdown(SHUT_RDWR);
+  this->clients_.clear();
+
+  if (this->socket_) {
+    this->socket_->close();
+    this->socket_.reset();
+  }
 }
 
-StreamServerComponent::Client::Client(std::unique_ptr<esphome::socket::Socket> socket, std::string identifier)
-    : socket(std::move(socket)), identifier{identifier}
-{
+void StreamServerComponent::socket_setup_failed_(const char *operation) {
+  ESP_LOGE(TAG, "Socket %s failed: errno %d (%s)", operation, errno, strerror(errno));
+  static_cast<void>(operation);
+  if (this->socket_) {
+    this->socket_->close();
+    this->socket_.reset();
+  }
+  this->mark_failed();
+}
+
+StreamServerComponent::Client::Client(std::unique_ptr<esphome::socket::Socket> socket,
+                                      const char *identifier)
+    : socket(std::move(socket)), last_activity(esphome::millis()) {
+  snprintf(this->identifier.data(), this->identifier.size(), "%s", identifier);
 }
