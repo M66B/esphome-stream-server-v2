@@ -102,13 +102,13 @@ void StreamServerComponent::accept_client_() {
 
   if (this->clients_.size() >= this->max_clients_) {
     ESP_LOGW(TAG, "Rejecting client %s: maximum of %u clients reached", peer, this->max_clients_);
-    client_socket->shutdown(SHUT_RDWR);
+    //client_socket->shutdown(SHUT_RDWR);
     return;
   }
 
   if (client_socket->setblocking(false) != 0) {
     ESP_LOGW(TAG, "Could not make client %s non-blocking: errno %d (%s)", peer, errno, strerror(errno));
-    client_socket->shutdown(SHUT_RDWR);
+    //client_socket->shutdown(SHUT_RDWR);
     return;
   }
 
@@ -393,9 +393,9 @@ void StreamServerComponent::dump_config() {
 }
 
 void StreamServerComponent::on_shutdown() {
-  for (Client &client : this->clients_)
-    client.socket->shutdown(SHUT_RDWR);
-  this->clients_.clear();
+  //for (Client &client : this->clients_)
+  //  client.socket->shutdown(SHUT_RDWR);
+  //this->clients_.clear();
 
   if (this->socket_) {
     this->socket_->close();
@@ -405,7 +405,7 @@ void StreamServerComponent::on_shutdown() {
 
 void StreamServerComponent::socket_setup_failed_(const char *operation) {
   ESP_LOGE(TAG, "Socket %s failed: errno %d (%s)", operation, errno, strerror(errno));
-  static_cast<void>(operation);
+  //static_cast<void>(operation);
   if (this->socket_) {
     this->socket_->close();
     this->socket_.reset();
